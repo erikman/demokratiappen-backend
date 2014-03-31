@@ -29,3 +29,7 @@ Parse.Cloud.define('tagga', saplo.extractTags);
 // var tag = require('cloud/tag');
 // Parse.Cloud.define("getTags", tag.getTags);
 
+var tagRelator = require('cloud/tagrelation');
+Parse.Cloud.define('relateTags', tagRelator.relateTags);
+Parse.Cloud.define('setAssociatonStrengthForTagRelation', tagRelator.setAssociatonStrengthForTagRelation);
+
