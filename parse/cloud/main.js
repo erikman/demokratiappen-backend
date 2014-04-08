@@ -16,6 +16,9 @@
  * along with Demokratiappen.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+// Start expressjs and load the REST API
+require('cloud/app.js');
+
 // Require paths are relative to root path of parse (but only code in cloud
 // can be used).
 
