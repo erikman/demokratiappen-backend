@@ -34,12 +34,20 @@ var error = function(res, status, text) {
   });
 };
 
-var isValidRequest = function(req) {
+var isValidAuthRequest = function(req) {
   return (req.header('Authorization') !== undefined &&
           req.body.grant_type !== undefined && 
           req.body.username !== undefined &&
           req.body.password !== undefined);
 };
+
+var isValidRequest = function(req) {
+  return req.query.oauth_token !== undefined;
+}
+
+var buildLink = function(req, path, token) {
+  return req.protocol + '://' + req.host + path + '?oauth_token=' + token;
+}
 
 // API
 Api.prototype.root = function(req, res) {
@@ -47,7 +55,7 @@ Api.prototype.root = function(req, res) {
 };
 
 Api.prototype.accessToken = function(req, res) {
-  if (isValidRequest(req)) {
+  if (isValidAuthRequest(req)) {
     if (req.body.grant_type === 'password') {
       Parse.User.logIn(req.body.username, req.body.password, {
         success: function(user) {
@@ -69,15 +77,33 @@ Api.prototype.accessToken = function(req, res) {
 };
 
 Api.prototype.getUser = function(req, res) {
-  ok(res, 200, { message: req.params.userid });
+  if (isValidRequest(req)) {
+    var token = req.query.oauth_token;
+
+    Parse.User.become(token).then(function (user) {
+      ok(res, 200, 'OK', { 
+        userid: user.id,
+        username: user.getUsername(),
+        email: user.getEmail(),
+        created: user.createdAt,
+        updated: user.updatedAt,
+        tags: buildLink(req, '/users/me/tags', token),
+        articles: buildLink(req, '/users/me/articles', token)
+      });
+    }, function (err) {
+      error(res, 401, "Invalid oauth_token. " + err.message );
+    });
+  } else {
+    error(res, 400, "Missing accessToken parameter.");
+  }
 };
 
 Api.prototype.getUserTags = function(req, res) {
-  error(res, 500, { error: "not implemented" });
+  error(res, 501, { error: "not implemented" });
 };
 
 Api.prototype.getUserArticles = function(req, res) {
-  error(res, 500, { error: "not implemented" });
+  error(res, 501, { error: "not implemented" });
 };
 
 module.exports = Api;
