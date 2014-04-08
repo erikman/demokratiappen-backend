@@ -47,6 +47,8 @@ app.param('articleid', /^\w+$/);
 var api = new api();
 app.get('/', api.root);
 app.post('/oauth/access_token', api.accessToken);
+app.get('/users/me', api.getUser);
+app.post('/users/me', api.updateUser);
 app.get('/users/:userid', api.getUser);
 app.get('/users/:userid/tags', api.getUserTags);
 app.get('/users/:userid/articles', api.getUserArticles);

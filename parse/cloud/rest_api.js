@@ -43,11 +43,31 @@ var isValidAuthRequest = function(req) {
 
 var isValidRequest = function(req) {
   return req.query.oauth_token !== undefined;
-}
+};
+
+var missingToken = function(res) {
+  error(res, 400, "Missing accessToken parameter.");
+};
+
+var invalidSession = function(res, err) {
+  error(res, 401, "Invalid oauth_token. " + err.message );
+};
 
 var buildLink = function(req, path, token) {
   return req.protocol + '://' + req.host + path + '?oauth_token=' + token;
-}
+};
+
+var buildUserObject = function(req, user) {
+  return {
+           userid: user.id,
+           username: user.getUsername(),
+           email: user.getEmail(),
+           created: user.createdAt,
+           updated: user.updatedAt,
+           tags: buildLink(req, '/users/me/tags', req.query.oauth_token),
+           articles: buildLink(req, '/users/me/articles', req.query.oauth_token)
+         };
+};
 
 // API
 Api.prototype.root = function(req, res) {
@@ -78,32 +98,41 @@ Api.prototype.accessToken = function(req, res) {
 
 Api.prototype.getUser = function(req, res) {
   if (isValidRequest(req)) {
-    var token = req.query.oauth_token;
-
-    Parse.User.become(token).then(function (user) {
-      ok(res, 200, 'OK', { 
-        userid: user.id,
-        username: user.getUsername(),
-        email: user.getEmail(),
-        created: user.createdAt,
-        updated: user.updatedAt,
-        tags: buildLink(req, '/users/me/tags', token),
-        articles: buildLink(req, '/users/me/articles', token)
-      });
+    Parse.User.become(req.query.oauth_token).then(function (user) {
+      ok(res, 200, 'OK', buildUserObject(req, user));
     }, function (err) {
-      error(res, 401, "Invalid oauth_token. " + err.message );
+      invalidSession(res, err);
     });
   } else {
-    error(res, 400, "Missing accessToken parameter.");
+    missingToken(res);
+  }
+};
+
+Api.prototype.updateUser = function(req, res) {
+  if (isValidRequest(req)) {
+    Parse.User.become(req.query.oauth_token).then(function(user) {
+      if (req.body.email) {
+        user.setEmail(req.body.email);
+        user.save().then(function(updatedUser) {
+          ok(res, 200, 'OK', buildUserObject(req, user));
+        }, function(err) {
+          error(res, 400, "Could not update email.");
+        });
+      }
+    }, function(error) {
+      invalidSession(res, err);
+    });
+  } else {
+    missingToken(res);
   }
 };
 
 Api.prototype.getUserTags = function(req, res) {
-  error(res, 501, { error: "not implemented" });
+  error(res, 501, "not implemented");
 };
 
 Api.prototype.getUserArticles = function(req, res) {
-  error(res, 501, { error: "not implemented" });
+  error(res, 501, "not implemented");
 };
 
 module.exports = Api;
