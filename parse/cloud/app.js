@@ -19,7 +19,7 @@
 // These two lines are required to initialize Express in Cloud Code.
 var express = require('express');
 var app = express();
-var api = require('cloud/rest_api');
+var rest = require('cloud/rest_api');
 
 // Global app configuration section
 app.use(express.bodyParser());    // Middleware for reading request body
@@ -44,14 +44,14 @@ app.param('tagid', /^\w+$/);
 app.param('articleid', /^\w+$/);
 
 // Routes
-var api = new api();
-app.get('/', api.root);
-app.post('/oauth/access_token', api.accessToken);
-app.get('/users/me', api.getUser);
-app.post('/users/me', api.updateUser);
-app.get('/users/:userid', api.getUser);
-app.get('/users/:userid/tags', api.getUserTags);
-app.get('/users/:userid/articles', api.getUserArticles);
+var api = rest.Api();
+app.get('/', function(req, res) { api.root(req, res) });
+app.post('/oauth/access_token', function(req, res) { api.accessToken(req, res) });
+app.get('/users/me', function(req, res) { api.getUser(req, res) });
+app.post('/users/me', function(req, res) { api.updateUser(req, res) });
+app.get('/users/:userid', function(req, res) { api.getUser(req, res) });
+app.get('/users/:userid/tags', function(req, res) { api.getUserTags(req, res) });
+app.get('/users/:userid/articles', function(req, res) { api.getUserArticles(req, res) });
 
 // Attach the Express app to Cloud Code.
 app.listen();

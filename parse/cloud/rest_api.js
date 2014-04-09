@@ -16,65 +16,16 @@
  * along with Demokratiappen. If not, see <http://www.gnu.org/licenses/>.
  */
 
-function Api() {};
-
-// Helpers
-var ok = function(res, status, text, data) {
-  res.json(status, {
-    statusCode: status,
-    statusText: text,
-    response: data
-  });
-};
-
-var error = function(res, status, text) {
-  res.json(status, {
-    statusCode: status,
-    statusText: text
-  });
-};
-
-var isValidAuthRequest = function(req) {
-  return (req.header('Authorization') !== undefined &&
-          req.body.grant_type !== undefined && 
-          req.body.username !== undefined &&
-          req.body.password !== undefined);
-};
-
-var isValidRequest = function(req) {
-  return req.query.oauth_token !== undefined;
-};
-
-var missingToken = function(res) {
-  error(res, 400, "Missing accessToken parameter.");
-};
-
-var invalidSession = function(res, err) {
-  error(res, 401, "Invalid oauth_token. " + err.message );
-};
-
-var buildLink = function(req, path, token) {
-  return req.protocol + '://' + req.host + path + '?oauth_token=' + token;
-};
-
-var buildUserObject = function(req, user) {
-  return {
-           userid: user.id,
-           username: user.getUsername(),
-           email: user.getEmail(),
-           created: user.createdAt,
-           updated: user.updatedAt,
-           tags: buildLink(req, '/users/me/tags', req.query.oauth_token),
-           articles: buildLink(req, '/users/me/articles', req.query.oauth_token)
-         };
+var Api = function Api() {
+  // still empty
 };
 
 // API
-Api.prototype.root = function(req, res) {
+Api.prototype.root = function root(req, res) {
   ok(res, 200, "OK", { message: 'badass api!'});
 };
 
-Api.prototype.accessToken = function(req, res) {
+Api.prototype.accessToken = function accessToken(req, res) {
   if (isValidAuthRequest(req)) {
     if (req.body.grant_type === 'password') {
       Parse.User.logIn(req.body.username, req.body.password, {
@@ -96,7 +47,7 @@ Api.prototype.accessToken = function(req, res) {
   }
 };
 
-Api.prototype.getUser = function(req, res) {
+Api.prototype.getUser = function getUser(req, res) {
   if (isValidRequest(req)) {
     Parse.User.become(req.query.oauth_token).then(function (user) {
       ok(res, 200, 'OK', buildUserObject(req, user));
@@ -108,7 +59,7 @@ Api.prototype.getUser = function(req, res) {
   }
 };
 
-Api.prototype.updateUser = function(req, res) {
+Api.prototype.updateUser = function updateUser(req, res) {
   if (isValidRequest(req)) {
     Parse.User.become(req.query.oauth_token).then(function(user) {
       if (req.body.email) {
@@ -119,7 +70,7 @@ Api.prototype.updateUser = function(req, res) {
           error(res, 400, "Could not update email.");
         });
       }
-    }, function(error) {
+    }, function(err) {
       invalidSession(res, err);
     });
   } else {
@@ -127,12 +78,132 @@ Api.prototype.updateUser = function(req, res) {
   }
 };
 
-Api.prototype.getUserTags = function(req, res) {
+Api.prototype.getUserTags = function getUserTags(req, res) {
   error(res, 501, "not implemented");
 };
 
-Api.prototype.getUserArticles = function(req, res) {
-  error(res, 501, "not implemented");
+Api.prototype.getUserArticles = function getUserArticles(req, res) {
+  var limit = req.query.limit || 100;
+  var offset = req.query.offset || 0;
+
+  var compileArticle = function(page) {
+    return {
+      articleid: page.id,
+      title: page.get('title'),
+      url: page.get('url'),
+      ref: "", 
+      tagsInArticle: [] // TODO: need to fetch this
+    };
+  };
+
+  if (isValidRequest(req)) {
+    Parse.User.become(req.query.oauth_token).then(function(user) {
+      var userArticlesResponse = {
+        userid: user.id,
+      }
+      
+      var Page = Parse.Object.extend('Page');
+      var query = new Parse.Query(Page);
+      query.equalTo('user', user);
+      query.include('negative_tags');
+      query.include('positive_tags');
+      query.descending('createdAt');
+      
+      // set limit
+      if (limit > 0 && limit <= 1000) {
+        query.limit(limit);
+        userArticlesResponse.limit = limit
+      } else {
+        userArticlesResponse.limit = 100; // Parse default
+      }
+
+      // set offset
+      query.skip(offset);
+      userArticlesResponse.offset = offset;
+
+      userArticlesResponse.next = buildLink(req, 
+        '/users/me/articles', {
+          limit: userArticlesResponse.limit,
+          offset: offset + userArticlesResponse.limit
+        });
+      
+      // execute query
+      query.find().then(function(pages) {
+        userArticlesResponse.articles = pages.map(compileArticle);
+        ok(res, 200, 'OK', userArticlesResponse);
+      }, 
+      function(err) {
+        error(res, 500, err.message);
+      });
+    }, function(err) {
+      invalidSession(res, err);
+    });
+  } else {
+    missingToken(res);
+  }
 };
 
-module.exports = Api;
+// Helpers
+var ok = function ok(res, status, text, data) {
+  res.json(status, {
+    statusCode: status,
+    statusText: text,
+    response: data
+  });
+};
+
+var error = function error(res, status, text) {
+  res.json(status, {
+    statusCode: status,
+    statusText: text
+  });
+};
+
+var isValidAuthRequest = function isValidAuthRequest(req) {
+  return (req.header('Authorization') !== undefined &&
+          req.body.grant_type !== undefined && 
+          req.body.username !== undefined &&
+          req.body.password !== undefined);
+};
+
+var isValidRequest = function isValidRequest(req) {
+  return req.query.oauth_token !== undefined;
+};
+
+var missingToken = function missingToken(res) {
+  error(res, 400, "Missing accessToken parameter.");
+};
+
+var invalidSession = function invalidSession(res, err) {
+  error(res, 401, "Invalid oauth_token. " + err.message );
+};
+
+var buildLink = function buildLink(req, path, params) {
+  var extraParams = '';
+  
+  if (params) {
+    extraParams = Object.keys(params).map(function(value) { 
+      return '&' + value + '=' + params[value]; 
+    }).join('');
+  }
+
+  return req.protocol + '://' + req.host + path + 
+    '?oauth_token=' + req.query.oauth_token + extraParams;
+};
+
+var buildUserObject = function buildUserObject(req, user) {
+  return {
+    userid: user.id,
+    username: user.getUsername(),
+    email: user.getEmail(),
+    created: user.createdAt,
+    updated: user.updatedAt,
+    tags: buildLink(req, '/users/me/tags'),
+    articles: buildLink(req, '/users/me/articles')
+  };
+};
+
+module.exports.Api = function() {
+  var api = new Api();
+  return api;
+};
