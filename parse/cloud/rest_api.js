@@ -86,13 +86,29 @@ Api.prototype.getUserArticles = function getUserArticles(req, res) {
   var limit = req.query.limit || 100;
   var offset = req.query.offset || 0;
 
+  var compileTags = function(page) {
+    var formatTag = function(tag) {
+      return {
+        name: tag.get('name'),
+        type: tag.get('type'),
+        created: tag.createdAt,
+        ref: buildLink(req, '/tags/' + tag.id)
+      };
+    }; 
+
+    return { 
+      negative: page.get('negative_tags').map(formatTag),
+      positive: page.get('positive_tags').map(formatTag)
+    };
+  };
+
   var compileArticle = function(page) {
     return {
       articleid: page.id,
       title: page.get('title'),
       url: page.get('url'),
       ref: "", 
-      tagsInArticle: [] // TODO: need to fetch this
+      tagsInArticle: compileTags(page)
     };
   };
 
