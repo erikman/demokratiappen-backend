@@ -16,376 +16,384 @@
  * along with Demokratiappen.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-var saploKeys = require('cloud/saplo_parameters').saploKeys; // relative to root path of parse
+// List with saplo error codes
+var saploErrorCodes = {
+  'TOKEN_EXPIRED': 595
+};
+
+var saploErrorDescriptions = {
+  'TOKEN_EXPIRED': 'Access token has expired'
+};
+
 
 /**
- * Connect to Saplo.
- *
- * @return Promise when we are connected
+ * @brief Initialize the saplo api library.
  */
-function connectToSaplo() {
-  var saploUrlWithToken = 'http://api.saplo.com/rpc/json?access_token=';
+var saploApiKey;
+var saploSecretKey;
+function initialize(apiKey, secretKey) {
+  if (!apiKey || !secretKey) {
+    console.error('Saplo.initialize was called with invalid keys.');
+    return;
+  }
+  if (saploApiKey || saploSecretKey) {
+    console.error('Saplo.initialize has already been called.');
+  }
 
-  // Request object to ask for a authorization token
-  var accessTokenRequest = {
-    "method": "auth.accessToken",
-    "params": {
-      "api_key":    saploKeys.saploApiKey,
-      "secret_key": saploKeys.saploSecretKey
-    }
+  saploApiKey = apiKey;
+  saploSecretKey = secretKey;
+}
+exports.initialize = initialize;
+
+
+/**
+ * @brief Make request to saplo.
+ *
+ * This function manages access to SAPLO. We will use a cached access token
+ * if available, otherwise we will request a new token. If we get a
+ * 'TOKEN_EXPIRED' error we will request a new token and resubmit the saplo
+ * request.
+ */
+var saploAccessUrlWithToken;
+function saploRequest(request) {
+  function dLog(str) {
+    // Enable next line to turn on debug logging
+    // console.log('saploRequest: ' + str);
+  }
+  dLog('begin');
+
+  if (!saploApiKey || !saploSecretKey) {
+    return Parse.Promise.error('Saplo.initialize must be invoked before requests can be made');
+  }
+
+  /**
+   * Connect to Saplo.
+   *
+   * @return Promise with access token when we are connected
+   */
+  function auth_accessToken() {
+    dLog('getAccessToken');
+    var saploUrlWithToken = 'http://api.saplo.com/rpc/json?access_token=';
+
+    // Request object to ask for a authorization token
+    var accessTokenRequest = {
+      "method": "auth.accessToken",
+      "params": {
+        "api_key":    saploApiKey,
+        "secret_key": saploSecretKey
+      }
+    };
+
+    return Parse.Cloud.httpRequest({
+      url: 'http://api.saplo.com/rpc/json',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify(accessTokenRequest)
+    }).then(function (httpResponse) {
+      // Was this a success?
+      var result = httpResponse.data.result;
+      if (result) {
+        dLog('Got saplo access token');
+        return Parse.Promise.as(saploUrlWithToken + result.access_token);
+      }
+      else {
+        var error = httpResponse.data.error;
+        var errorMessage;
+        if (error) {
+          errorMessage = 'Saplo error(' + error.code + '): ' + error.msg;
+        }
+        else {
+          errorMessage = 'Saplo: Neither result nor error returned';
+        }
+
+        console.error(errorMessage);
+        return Parse.Promise.error(errorMessage);
+      }
+    });
+  }
+
+  function saploRequestWithToken(accessUrl) {
+    dLog('Make saplo request: ' + JSON.stringify(request));
+
+    // Try to make real request
+    return Parse.Cloud.httpRequest({
+      url: accessUrl,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify(request)
+    }).then(function (httpResponse) {
+      dLog('Got Saplo response: ' + JSON.stringify(httpResponse.data));
+
+      if (httpResponse.data.result) {
+        return Parse.Promise.as(httpResponse.data.result);
+      }
+      else {
+        var error = httpResponse.data.error;
+        return Parse.Promise.error(error);
+      }
+    });
+  }
+
+  if (saploAccessUrlWithToken) {
+    return saploRequestWithToken(saploAccessUrlWithToken)
+      .fail(function (error) {
+      // The request failed, check if it was due to an expired token
+      if (error.code ==  saploErrorCodes['TOKEN_EXPIRED']) {
+        dLog('Saplo token has expired, request new token');
+        auth_accessToken().then(function (accessUrl) {
+          // Cache the url until next time we make a saplo request
+          saploAccessUrlWithToken = accessUrl;
+
+          // Issue the main request
+          dLog('reissuing saplo request');
+          return saploRequestWithToken(saploAccessUrlWithToken);
+        });
+      }
+      else {
+        // The function failed due to some other error. Rethrow the error so
+        // someone else can handle it.
+        return Parse.Promise.error(error);
+      }
+    });
+  }
+  else {
+    dLog('No Sapo acccess token available. Request one.');
+    return auth_accessToken().then(function (accessUrl) {
+      // Cache the url until next time we make a saplo request
+      saploAccessUrlWithToken = accessUrl;
+
+      // Issue the main request
+      return saploRequestWithToken(saploAccessUrlWithToken);
+    });
+  }
+}
+
+
+function Text(data) {
+  this.collection_id = data.collection_id;
+  this.text_id = data.text_id;
+}
+exports.Text = Text;
+
+
+/**
+ * @brief Wrapper around Saplo's text.relatedGroups function
+ *
+ * The function returns an promise with an array of objects like:
+ * {
+ *   relevance: 0.91,
+ *   group: { Group Object }
+ * },
+ *
+ * @return Promise that will return an array with related groups
+ */
+Text.prototype.relatedGroups = function() {
+  var request = {
+    method: 'text.relatedGroups',
+    params: {
+      collection_id: this.collection_id,
+      text_id: this.text_id
+    },
+    id:0
   };
 
-  return Parse.Cloud.httpRequest({
-    // Connect to Saplo to get an access token
-    url: 'http://api.saplo.com/rpc/json',
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    body: JSON.stringify(accessTokenRequest),
-  }).then(function (httpResponse) {
-    if (httpResponse.status != 200) {
-      return Parse.Promise.error('saploConnectFailure: Saplo returned status: ' + httpResponse.status);
+  return saploRequest(request).then(function (result) {
+    // Convert the result to wrapped objects
+    var groups = [];
+    for (var i = 0; i < result.related_groups; i++) {
+      var saploGroup = result.related_groups[i];
+      groups[groups.length] = {
+        relevance: saploGroup.relevance,
+        group: new Group(saploGroup)
+      };
     }
 
-    var requestObject = JSON.parse(httpResponse.text).result;
-    var accessToken = requestObject.access_token;
-
-    return Parse.Promise.as(saploUrlWithToken + accessToken);
+    return Parse.Promise.as(groups);
   });
 }
 
 
-// Supported parameters in request object:
-// text:     The text to be tagged
-// url:      The url for the text (uesd for cache:ing)
-// headline: The text's headline
-function extractTags(request, response) {
-  var requestJSON = JSON.parse(request.body);
-
-  var textToBeParsed = requestJSON.text;
-  var textUrl = requestJSON.url;
-  var textHeadline = requestJSON.title;
-  var urlExists = false;
-  var url; // The Url object in Parse database
-
-  function dLog(str) {
-    // Enable next line to turn on debug logging 
-    // console.log('saplo.extractTags: ' + str);
-  }
-  function eLog(str) {
-    console.error('saplo.extractTags: ' + str);
-  }
-
-  if (!textToBeParsed) {
-    response.error("Missing required field: text");
-    return;
-  }
-  if (!textUrl) {
-    response.error("Missing required field: url");
-    return;
-  }
-  if (!textHeadline) {
-    response.error("Missing required field: title");
-    return;
-  }
-
-  // Add text to "our" collection 
-  // We store the text's in "our" database with url, text, language,
-  // (collection-id), saplo-id
-  // then we can do straight to call text.tags(id)
-  // When we create a text in Saplo we /can/ add the following properties:
-  //  headline (used), url (used), publish_date, authors and ext_text_id
-  var textIdCreate = {
-    "method": "text.create",  
-    "params": {
-      "body": textToBeParsed, 
-      "collection_id": saploKeys.DemokratiArtiklar, 
-      //"url": "url" (Set in accessSuccess if it exists)
-    }, 
-    "id": 0 
-  };
-  
-  // Get the text from "our" collection
-  var textIdGet = { 
-    "method": "text.get",  
-    "params": {
-      "text_id":       0, 
-      "collection_id": saploKeys.DemokratiArtiklar, 
-      //"url":         "url" (Set in accessSuccess if it exists)
-    }, 
-    "id": 0 
-  };
-
+Text.prototype.tags = function() {
   // Object to use to post the text id and get back the tags
-  var tagRequest = {
-    "method": "text.tags", 
-    "params": { 
-      "collection_id": saploKeys.DemokratiArtiklar, 
-      "text_id": 0, 
-      "wait": 15 
-    }, 
-    "id": 0 
+  var request = {
+    "method": "text.tags",
+    "params": {
+      "collection_id": this.collection_id,
+      "text_id": this.text_id,
+      "wait": 15
+    },
+    "id": 0
   };
 
-  var saploUrlWithToken;
+  return saploRequest(request);
+}
 
-  // Inner functions 
-  // Get the Saplo tags from the text object requestObject.text_id
-  // Return Parse.Promise 
-  function textIdSuccess(httpResponse) {
-    dLog('entering textIdSuccess');
 
-    if (httpResponse.status != 200) {
-      eLog("Saplo returned status: " + httpResponse.status);
-      return Parse.Promise.error('Saplo returned error status');
+/**
+ * @brief List Saplo groups
+ *
+ * Each group has properties like:
+ * {
+ *   "group_id":13,
+ *   "name":"My Tech Group",
+ *   "language":"en",
+ *   "description":"Group based on tech articles.",
+ *   "date_created":"2011-03-30T10:31:33z",
+ *   "date_updated":"2011-07-15T23:08:54z"
+ * }
+ *
+ * only group_id is guaranteed to exist, depending on how the group was
+ * retrieved.
+ */
+function Group(groupData) {
+  this.group_id = groupData.group_id;
+  this.name = groupData.name;
+  this.language = groupData.language;
+  this.description = groupData.description;
+}
+exports.Group = Group;
+
+/**
+ * @brief Create Saplo group
+ *
+ * @return Promise when group is created
+ */
+Group.create = function(name, lang) {
+  var request = {
+    "method": "group.create",
+    "params": {
+      "name": name,
+      "language": lang
+    },
+    "id":0
+  };
+
+  return saploRequest(request).then(function (result) {
+    var groupObject = new Group(result);
+    return Parse.Promise.as(groupObject);
+  });
+}
+
+
+/**
+ * @brief List Saplo groups
+ *
+ * Each group looks like:
+ * {
+ *   "group_id":13,
+ *   "name":"My Tech Group",
+ *   "language":"en",
+ *   "description":"Group based on tech articles.",
+ *   "date_created":"2011-03-30T10:31:33z",
+ *   "date_updated":"2011-07-15T23:08:54z"
+ * },
+ *
+ * @return Promise with list of groups
+ */
+Group.list = function() {
+  var request = {
+    "method": "group.list",
+    "params": {},
+    "id":0
+  };
+
+  return saploRequest(request).then(function (result) {
+    groupObjects = [];
+    for (var i = 0; i < result.groups.length; i++) {
+      groupObjects[groupObjects.length] = new Group(result.groups[i]);
     }
-
-    var parsedResult = JSON.parse(httpResponse.text).result;
-    if (!parsedResult){
-      eLog("Saplo did not return a result " + httpResponse.text);
-      return Parse.Promise.error('Saplo did not return a result');
-    }
-
-    var textId = parsedResult.text_id;
-    if (!textId) {
-      // httpResponse.source = "textIdSuccess: (no textId)";
-      eLog('Saplo did not return a text_id ' + httpResponse.text);
-      return Parse.Promise.error('Saplo did not return text_id');
-    }
-
-    tagRequest.params.text_id = textId;
-
-    // This is where we collect our parse tags. The indices matches the
-    // items in the saploTags.tags array
-    var resultTags = [];
-    var relevanceTags = [];
-    var saploTags = [];
- 
-    return Parse.Cloud.httpRequest({
-      url: saploUrlWithToken,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(tagRequest)
-    }).then(function (httpResponse) {
-      dLog('have saplo tags');
-
-      if (httpResponse.status != 200) {
-        eLog("tagRequest: saplo returned status: " + httpResponse.status);
-        return Parse.Promise.error('tagRequest failed');
-      }
-
-      // Now we have an array with tags
-      // [
-      //   {
-      //     "category": "person/location/organisation",
-      //     "tag": "Bertil Adam",
-      //     "relevance": 0.7,
-      //   },
-      // ]
-      saploTags = JSON.parse(httpResponse.text).result;
-
-      // Search for tags in the parse database, prepare our query
-      var tagNames = [];
-      for (var i = 0; i < saploTags.tags.length; i++) {
-        tagNames = tagNames.concat(saploTags.tags[i].tag);
-      }
-
-      var Tag = Parse.Object.extend("Tag");
-      var query = new Parse.Query("Tag");
-      query.containedIn("name", tagNames);
-      return query.find();
-    }).then(function (parseTags) {
-      dLog('have parse tags');
-
-      // Check if we have found any new tags that don't have a post in
-      // the parse database.
-      var newTagPromises = [];
-      for (var i = 0; i < saploTags.tags.length; i++) {
-        var foundTag = false;
-        for (var j = 0; j < parseTags.length; j++) {
-          if (parseTags[j].get("name") == saploTags.tags[i].tag
-              && parseTags[j].get("type") == saploTags.tags[i].category) {
-            foundTag = true;
-
-            resultTags[resultTags.length] = parseTags[j];
-            break;
-          }
-        }
-
-        if (!foundTag) {
-          // Need to use master key, ordinary users are not allowed to create
-          // Tag objects
-          Parse.Cloud.useMasterKey();
-
-          // Create parse object with public read access, but no write
-          // access.
-          var tagACL = new Parse.ACL();
-          tagACL.setPublicReadAccess(true);
-          var Tag = Parse.Object.extend("Tag");
-          var tag = new Tag();
-          tag.setACL(tagACL);
-          tag.set("name", saploTags.tags[i].tag);
-          tag.set("type", saploTags.tags[i].category);
-
-          // Add save operation to promise
-          newTagPromises[newTagPromises.length] = tag.save();
-          resultTags[resultTags.length] = tag;
-        }
-      }
-
-      // Return promise that is triggered when all tags have been saved.
-      return Parse.Promise.when(newTagPromises);
-    }).then(function () {
-      dLog('saved new tags');
-
-      // Associate relevance with the tags (now we have id on all our
-      // objects).
-      // Note resultTags and saploTags match so same index can be used in
-      // both arrays.
-      var urlRelevanceTags = [];
-      for (var i = 0; i < resultTags.length; i++) {
-        var relevanceTag = {
-          id: resultTags[i].id,
-          name: resultTags[i].get("name"),
-          relevance: saploTags.tags[i].relevance
-        };
-        relevanceTags[relevanceTags.length] = relevanceTag;
-
-        urlRelevanceTags[urlRelevanceTags.length] = {
-          tag: resultTags[i],
-          relevance: saploTags.tags[i].relevance
-        };
-      }
- 
-      // Save the tags on the Url object
-      var promise;
-      if (!urlExists) {
-        dLog('Creating new Url Object');
-
-        // Need to use master key, ordinary users are not allowed to create
-        // Tag objects
-        Parse.Cloud.useMasterKey();
-
-        var urlACL = new Parse.ACL();
-        urlACL.setPublicReadAccess(true);
-
-        var Url = Parse.Object.extend("Url");
-        var url = new Url();
-
-        url.setACL(urlACL);
-        url.set("url", textUrl);
-        url.set("textId", textId);
-        url.set("text", textToBeParsed);
-        url.set("headline", textHeadline);
-        url.set("relevanceTags", urlRelevanceTags);
-
-        promise = url.save();
-      }
-      else {
-        // Create a promise that immedideately succeeds
-        promise = new Parse.Promise.as();
-      }
-      return promise;
-    }).then(function () {
-      dLog('Url Object saved');
-
-      // Return the result tag objects to the requester
-      response.success(relevanceTags);
-      return Parse.Promise.as();
-    });
-  } // textIdSuccess
-
-  // Main request, sends the others as "result functions" to the httpResult's
-  // success function.
-  connectToSaplo().then(function(urlWithToken) {
-    // We have access to Saplo, try to find the text in our database
-    // if we have it, get the ID to get the tags from Saplo
-    // if not, add it to Saplo, get the ID and add the url to our database
-    saploUrlWithToken = urlWithToken;
-    
-    if (textUrl) {
-      // with or without params?
-      textIdCreate.params.url = textUrl;
-    }
-    if (textHeadline) {
-      textIdCreate.params.headline = textHeadline;
-    }
-
-    // Start a thread to find the url in our database, and get the tags
-    var query = new Parse.Query("Url");
-    query.equalTo("url", textUrl);
-    return query.find();
-  }).then(function(urls) {
-    if (urls.length == 0) {
-      // If we _don't_ have the url in our database, so send it to saplo for
-      // analysis.
-      return Parse.Cloud.httpRequest({
-        url: saploUrlWithToken,
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json; charset=utf-8' },
-        body: JSON.stringify(textIdCreate)
-      }).then(textIdSuccess);
-    }
-    else {
-      // We already have the url in our database
-      var url = urls[0];
-      var textId = url.get("textId");
-      if (!textId) {
-        eLog('No textId in returned parse object');
-        return Parse.Promise.error('no text id');
-      }
-
-      textIdGet.params.text_id = textId;
-      urlExists = true;
-
-      // Get the tags from Saplo or from Parse?
-      // Now from Saplo (=> we must have the Saplo accessToken)
-      // If we change this, we _could_ move the saplo login from the main
-      // request.
-      return Parse.Cloud.httpRequest({
-        url: saploUrlWithToken,
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json; charset=utf-8' },
-        body: JSON.stringify(textIdGet)
-      }).then(textIdSuccess);
-    }
-  }).then(function() {
-    dLog('success');
-  }, function (error) {
-    eLog(JSON.stringify(error));
-    response.error("Finding parse URL object failed.");
-  }); 
-} // extractTags
-exports.extractTags = extractTags;
+    return Parse.Promise.as(groupObjects);
+  });
+}
 
 
-function listCollections(request, response) {
-  var collectionList = {
+/**
+ * @brief Remove Saplo group
+ *
+ * This function is called group.delete in the SAPLO api, but delete is a
+ * reserved word in javascript, so we use remove instead.
+ *
+ * Note that the object is not destroyed because that is up to the garbage
+ * collector to do, instead we just clear the contents of the group object.
+ *
+ * @return Promise when group has been deleted.
+ */
+Group.prototype.remove = function() {
+  var request = {
+    "method": "group.delete",
+    "params": {
+      'group_id': this.group_id
+    },
+    "id":0
+  };
+
+  return saploRequest(request).then(function () {
+    // This doesn't really delete anything it just makes group_id and name
+    // return undefined.
+    delete this.group_id;
+    delete this.name;
+    return Parse.Promise.as();
+  });
+}
+
+
+/**
+ * @brief A Saplo Collection object
+ *
+ * A collection is a container where you store texts you want to analyze.
+ *
+ * @constructor
+ * @param data Initialization object
+ */
+function Collection(data) {
+  this.collection_id = data.collection_id;
+};
+exports.Collection = Collection;
+
+
+/**
+ * @brief Get all registered collections
+ *
+ * @return Promise with array of collection objects
+ */
+Collection.list = function() {
+  var request = {
     'method': 'collection.list',
     'params': {},
     'id': 0
   };
 
-  connectToSaplo().then(function(saploUrlWithToken) {
-    return Parse.Cloud.httpRequest({
-      url: saploUrlWithToken,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(collectionList)
-    });
-  }).then(function(httpResponse) {
-    if (httpResponse.status != 200) {
-      response.error("saplo: collection.list failed.");
-      return;
+  return saploRequest(request).then(function (result) {
+    collectionObjects = [];
+    for (var i = 0; i < result.collections.length; i++) {
+      collectionObjects[groupObjects.length]
+        = new Collection(result.collections[i]);
     }
-
-    // console.log(httpResponse.data);
-    // var responseData = JSON.parse(httpResponse);
-    response.success(httpResponse.data);
-  },
-  function(error) {
-    console.error('saplo.listCollections failed: ' + JSON.stringify(error));
-    response.error('listCollections failed.');
+    return Parse.Promise.as(collectionObjects);
   });
 }
-exports.listCollections = listCollections;
+
+
+/**
+ * @brief Create text object in collection
+ *
+ * @return Parse.Promise with a Saplo.Text object
+ */
+Collection.prototype.createText = function(body, headline, url) {
+    var request = {
+    method: 'text.create',
+    params: {
+      body: body,
+      headline: headline,
+      collection_id: this.collection_id,
+      url: url
+    },
+    id: 0
+  };
+
+  return saploRequest(request).then(function (textData) {
+    var textObject = new Text(textData);
+    return Parse.Promise.as(textObject);
+  });
+}
 

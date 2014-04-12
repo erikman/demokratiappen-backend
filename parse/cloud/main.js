@@ -19,17 +19,21 @@
 // Require paths are relative to root path of parse (but only code in cloud
 // can be used).
 
-var saplo = require('cloud/saplo');
-Parse.Cloud.define('tagga', saplo.extractTags);
-// Parse.Cloud.define('listCollections', saplo.listCollections);
+var Saplo = require('cloud/saplo');
+var saploKeys = require('cloud/saplo_parameters').saploKeys;
+
+var tag = require('cloud/tag');
+var tagRelator = require('cloud/tagrelation');
+
+// Initialize the saplo library
+Saplo.initialize(saploKeys.saploApiKey, saploKeys.saploSecretKey);
+
+Parse.Cloud.define('tagga', tag.extractTags);
+// Parse.Cloud.define('listCollections', tag.listCollections);
 
 // var setup = require('cloud/setup');
 // Parse.Cloud.define('createDefaultUsers', setup.createDefaultUsers);
 
-// var tag = require('cloud/tag');
-// Parse.Cloud.define("getTags", tag.getTags);
-
-var tagRelator = require('cloud/tagrelation');
 Parse.Cloud.define('relateTags', tagRelator.relateTags);
 Parse.Cloud.define('setAssociatonStrengthForTagRelation', tagRelator.setAssociatonStrengthForTagRelation);
 
