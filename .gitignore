@@ -1,4 +1,5 @@
 /parse/config/global.json
+/parse/cloud/saplo_parameters.js
 .DS_Store
 *.swp
 *~
