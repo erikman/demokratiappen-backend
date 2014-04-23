@@ -18,6 +18,7 @@
 
 var Saplo = require('cloud/saplo');
 var saploKeys = require('cloud/saplo_parameters').saploKeys;
+var tagBooster = require('cloud/tagbooster');
 
 var collection = new Saplo.Collection({'collection_id': saploKeys.DemokratiArtiklar});
 
@@ -195,7 +196,18 @@ function extractTags(request, response) {
     url.set("text", textBody);
     url.set("headline", textHeadline);
 
-    return addTagsOnUrl(url).then(function (url) {
+    return addTagsOnUrl(url).then(function () {
+      // Search for extra tags to boost
+      return tagBooster.boostTags(textHeadline + ' ' + textBody);
+    }).then(function (extraRelevanceTags) {
+      var relevanceTags = url.get('relevanceTags');
+      dLog('boosting tags: ' + JSON.stringify(extraRelevanceTags));
+
+      var newRelevanceTags
+        = tagBooster.combineRelevanceTags(extraRelevanceTags, relevanceTags);
+
+      url.set('relevanceTags', newRelevanceTags);
+
       dLog('save url object');
       return url.save();
     });
