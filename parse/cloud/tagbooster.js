@@ -109,10 +109,14 @@ exports.combineRelevanceTags = combineRelevanceTags;
  * @return {Parse.Promise} which will resolve with an array of relevanceTags
  */
 function boostTags(text) {
+  // Tokenize the text
   var tokens = tokenize(text);
 
+  // Filter the tokenized version of the text
+  var searchTokens = _.uniq(tokens.slice(0).sort(), true);
+
   var query = new Parse.Query('BoostTag');
-  query.containedIn('matchToken', tokens);
+  query.containedIn('matchToken', searchTokens);
   query.include('tag');
   return query.find().then(function (boostTags) {
     var relevanceTags = [];
@@ -165,48 +169,72 @@ exports.boostTags = boostTags;
  *
  * This function allows us to register tags which should be boosted when we
  * parse texts.
+ *
+ * The input format is:
+ * { "map": [
+ *   { term:"string1", tag:"tag name1" },
+ *   { term:"string2", tag:"tag name2" },
+ *   ...
+ * ] }
+ * the 'term' is optional, if not specified it is set to same value as the 'tag'
  */
 function addTagBoost(request, response) {
   var BoostTag = Parse.Object.extend('BoostTag');
-  var tagNames = JSON.parse(request.body).tagNames;
-  if (!tagNames) {
-    response.error('Required parameter tagNames was not specified.');
+  var map = JSON.parse(request.body).map;
+  if (!map) {
+    response.error('Required parameter "map" was not specified.');
     return;
   }
+  var tagNames = _.uniq(_.pluck(map, 'tag'));
 
   // Search for the tags in parse
   var query = new Parse.Query('Tag');
   query.containedIn('name', tagNames);
   query.find().then(function(parseTags) {
+    function getTagName(tag) {
+      return tag.get('name');
+    }
+
     // Are there any tags we are missing in the database? We can't add them
     // here since we don't know the type of the tag so just report them.
     if (parseTags.length != tagNames.length) {
       // Generate array with parse tag names
-      var parseTagNames
-        = _.map(parseTags, function(x) { return x.get('name'); });
+      var parseTagNames = _.map(parseTags, getTagName);
       var missingTags = _.difference(tagNames, parseTagNames);
       var missingTagsString = _.reduce(missingTags, function (a, b) {
         return a.concat(", ", b);
-      });
+      }, "");
 
       console.error('Following tags are unknown: ' + missingTagsString);
       return Parse.Promise.error('Following tags are unknown: '
         + missingTagsString);
     }
 
+    // Create a map from tagName to tag object
+    var tagsByName = _.indexBy(parseTags, getTagName);
+
     // Add the tags to the BoostTag collection
     var boostTags = [];
-    for (var i = 0; i < parseTags.length; i++) {
-      // Tokenize the tag
-      var tagName = parseTags[i].get('name');
-      var tokens = tokenize(tagName);
+    for (var i = 0; i < map.length; i++) {
+      var tagName = map[i].tag;
+
+      // Get the tag for this token
+      var tag = tagsByName[tagName];
+      if (!tag) {
+        return Parse.Promise.error('Missing tag ' + tagName);
+      }
+
+      // Tokenize the identifier, this might result in several tokens
+      var term = map[i].term ? map[i].term : map[i].tag;
+      var tokens = tokenize(term);
       if (!tokens || tokens.length <= 0) {
         return Parse.Promise.error('Error parsing tag "' + tagName + '"');
       }
 
-      // Create new BoostTag object
+      // Create new BoostTag object. The first token is stored separately so
+      // we easily can search for it.
       var boostTag = new BoostTag();
-      boostTag.set('tag', parseTags[i]);
+      boostTag.set('tag', tag);
       boostTag.set('name', tagName);
       boostTag.set('matchToken', tokens[0]);
       if (tokens.length > 1) {
