@@ -32,9 +32,9 @@
  * boosted tag.
  */
 
-
+// We user our own version of underscore that includes the 'indexBy' function
 var _ = require('cloud/underscore');
-
+var Snowball = require('cloud/snowball');
 
 /**
  * @brief Take a text and split it into tokens
@@ -47,10 +47,17 @@ function tokenize(text) {
   // international charactersets.
   var tokens = text.match(/[a-z0-9_\-\u00C0-\u017F]+/gi);
 
-  // TODO: Include snowball.js for stemming,
-  // e.g. 'socialdemokraternas' -> 'socialdemokrat'
+  // Use snowball.js for stemming, e.g. 'trees' -> 'tree'
+  var stemmer = new Snowball.Snowball('Swedish');
+  function getStem(word) {
+    stemmer.setCurrent(word);
+    stemmer.stem();
+    return stemmer.getCurrent();
+  }
 
-  return _.map(tokens, function(x) { return x.toLowerCase(); });
+  return _.map(tokens, function(word) {
+    return getStem(word).toLowerCase();
+  });
 }
 
 
