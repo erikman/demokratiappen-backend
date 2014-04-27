@@ -25,6 +25,7 @@ var saploKeys = require('cloud/saplo_parameters').saploKeys;
 var tag = require('cloud/tag');
 var tagRelator = require('cloud/tagrelation');
 var tagBooster = require('cloud/tagbooster');
+var userTag = require('cloud/usertag');
 
 // Initialize the saplo library
 Saplo.initialize(saploKeys.saploApiKey, saploKeys.saploSecretKey);
@@ -39,3 +40,5 @@ Parse.Cloud.define('relateTags', tagRelator.relateTags);
 Parse.Cloud.define('setAssociatonStrengthForTagRelation', tagRelator.setAssociatonStrengthForTagRelation);
 
 Parse.Cloud.define('addTagBoost', tagBooster.addTagBoost);
+
+Parse.Cloud.job('updateUserTags', userTag.updateUserTags);
