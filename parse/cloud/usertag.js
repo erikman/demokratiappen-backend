@@ -39,6 +39,13 @@ function differenceBy(listA, listB, iterator) {
 }
 
 
+function bbProperty(propertyName) {
+  return function (obj) {
+    return obj.get(propertyName);
+  }
+}
+
+
 /**
  * @brief Cloud function for updating the UserTags
  */
@@ -51,16 +58,12 @@ function updateUserTags(request, response) {
   //       field on the Page object.
   var Page = Parse.Object.extend('Page');
   var UserTag = Parse.Object.extend('UserTag');
+  var UserTopicTag = Parse.Object.extend('UserTopicTag');
 
-  function getTagName(tag) {
-    return tag.get('name');
-  }
-  function getTag(tag) {
-    return tag.get('tag');
-  }
-  function getObjectId(tag) {
-    return tag.id;
-  }
+  var getTagName = bbProperty('name');
+  var getTag = bbProperty('tag');
+  var getObjectId = _.property('id');
+
   var pageCounter = 0;
 
   // Iterate over the Page objects connected to this user
@@ -74,23 +77,46 @@ function updateUserTags(request, response) {
     }
     pageCounter += 1;
 
-    // Get the user tags for the tags associated with this page
     var negativeTags = page.get('negative_tags');
     var positiveTags = page.get('positive_tags');
     var allTags = _.union(positiveTags, negativeTags);
     var user = page.get('user');
     var acl = new Parse.ACL(user);
 
-    var userTags = new Parse.Query(UserTag);
-    userTags.include('tag');
-    userTags.equalTo('user', user);
-    userTags.containedIn('tag', allTags);
-    return userTags.find().then(function (userTags) {
-      var userTagsToSave = [];
+    // Create mapping for the positive and negative tags
+    var negativeIds = _.indexBy(negativeTags, getObjectId);
+    var positiveIds = _.indexBy(positiveTags, getObjectId);
 
-      // Create mapping for the positive and negative tags
-      var negativeIds = _.indexBy(negativeTags, getObjectId);
-      var positiveIds = _.indexBy(positiveTags, getObjectId);
+    // Create user topic tags
+    var userTopicTags = [];
+    for (var i = 0; i < allTags.length; i++) {
+      var tag = allTags[i];
+      var tagId = getObjectId(tag);
+      var newUserTopicTag = new UserTopicTag();
+
+      newUserTopicTag.set('name', tag.get('name'));
+      newUserTopicTag.set('tag',  tag);
+      newUserTopicTag.set('user', user);
+
+      var score = (_.has(positiveIds, tagId) ? 1 : 0);
+        + (_.has(negativeIds, tagId) ? -1 : 0);
+
+      newUserTopicTag.set
+        ('positiveCount', _.has(positiveIds, tagId) ? 1 : 0);
+      newUserTopicTag.set
+        ('negativeCount', _.has(negativeIds, tagId) ? 1 : 0);
+
+      userTopicTags[userTopicTags.length] = newUserTopicTag;
+    }
+    return Parse.Object.saveAll(userTopicTags).then(function () {
+      // Get the user tags for the tags associated with this page 
+      var userTags = new Parse.Query(UserTag);
+      userTags.include('tag');
+      userTags.equalTo('user', user);
+      userTags.containedIn('tag', allTags);
+      return userTags.find();
+    }).then(function (userTags) {
+      var userTagsToSave = [];
 
       // Check if there are any UserTag objects that needs to be created.
       var tagsForExistingUserTags = _.map(userTags, getTag);
@@ -137,3 +163,4 @@ function updateUserTags(request, response) {
   });
 }
 exports.updateUserTags = updateUserTags;
+
