@@ -39,10 +39,42 @@ function differenceBy(listA, listB, iterator) {
 }
 
 
+/**
+ * @brief Function that works like _.property(key) but for backbone objects
+ */
 function bbProperty(propertyName) {
   return function (obj) {
     return obj.get(propertyName);
   }
+}
+
+
+function recreateAllUserTags(request, response) {
+  // Iterate over all page objects
+  var Page = Parse.Object.extend('Page');
+  var pageCounter = 0;
+
+  // TODO: Remove all UserTag objects
+  // TODO: Remove all UserTopicTag objects
+
+  // Iterate over all Page objects
+  var pages = new Parse.Query(Page);
+  pages.include('positive_tags');
+  pages.include('negative_tags');
+  pages.each(function (page) {
+    if (pageCounter % 100 === 0) {
+      // Set the  job's progress status
+      response.message(pageCounter + ' pages processed.');
+    }
+    pageCounter += 1;
+
+    page.set('processState', 0);
+    return page.save();
+  }).then(function() {
+    response.success('Success, updated page state for ' + pageCounter + ' pages');
+  }, function (error) {
+    response.error('Failure: ' + JSON.stringify(error));
+  });
 }
 
 
@@ -66,14 +98,15 @@ function updateUserTags(request, response) {
 
   var pageCounter = 0;
 
-  // Iterate over the Page objects connected to this user
+  // Iterate over all Page objects
   var pages = new Parse.Query(Page);
   pages.include('positive_tags');
   pages.include('negative_tags');
+  pages.equalTo('processState', 0);
   pages.each(function (page) {
     if (pageCounter % 100 === 0) {
       // Set the  job's progress status
-      response.message(pageCounter + " pages processed.");
+      response.message(pageCounter + ' pages processed.');
     }
     pageCounter += 1;
 
@@ -87,6 +120,9 @@ function updateUserTags(request, response) {
     var negativeIds = _.indexBy(negativeTags, getObjectId);
     var positiveIds = _.indexBy(positiveTags, getObjectId);
 
+    page.set('processState', 1);
+    userTopicTags[userTopicTags.length] = page;
+
     // Create user topic tags
     var userTopicTags = [];
     for (var i = 0; i < allTags.length; i++) {
@@ -96,20 +132,17 @@ function updateUserTags(request, response) {
 
       newUserTopicTag.set('name', tag.get('name'));
       newUserTopicTag.set('tag',  tag);
+      newUserTopicTag.set('topic', tag.get('topic'));
       newUserTopicTag.set('user', user);
 
       var score = (_.has(positiveIds, tagId) ? 1 : 0);
         + (_.has(negativeIds, tagId) ? -1 : 0);
-
-      newUserTopicTag.set
-        ('positiveCount', _.has(positiveIds, tagId) ? 1 : 0);
-      newUserTopicTag.set
-        ('negativeCount', _.has(negativeIds, tagId) ? 1 : 0);
+      newUserTopicTag.set('score', score);
 
       userTopicTags[userTopicTags.length] = newUserTopicTag;
     }
     return Parse.Object.saveAll(userTopicTags).then(function () {
-      // Get the user tags for the tags associated with this page 
+      // Get the user tags for the tags associated with this page
       var userTags = new Parse.Query(UserTag);
       userTags.include('tag');
       userTags.equalTo('user', user);
@@ -157,7 +190,7 @@ function updateUserTags(request, response) {
       return Parse.Object.saveAll(userTagsToSave);
     });
   }).then(function() {
-    response.success('Success, updated UserTags for ' + pageCounter + ' pages');
+    response.success('Success, updated user tags for ' + pageCounter + ' pages');
   }, function (error) {
     response.error('Failure: ' + JSON.stringify(error));
   });
