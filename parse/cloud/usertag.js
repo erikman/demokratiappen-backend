@@ -49,27 +49,68 @@ function bbProperty(propertyName) {
 }
 
 
+/**
+ * @brief Remove all objects that matches a query.
+ *
+ * @return {Parse.Promise} when the objects have been removed.
+ */
+function deleteAll(query) {
+  var batchSize = 1000;
+
+  var objects = [];
+  return query.each(function (object) {
+    // Create batches of objects each that we remove
+    var promise;
+    objects[objects.length] = object;
+    if (objects.length > batchSize) {
+      // We have filled one batch, send it to parse for removal, the 'each' iteration will
+      // continue when the objects have been removed.
+      promise = Parse.Object.deleteAll(objects);
+      objects = [];
+    }
+    else {
+      promise = Parse.Promise.as();
+    }
+    return promise;
+  }).then(function () {
+    // Take care of the last batch of objects
+    promise = Parse.Objects.deleteAll(objects);
+    return promise;
+  });
+}
+
+
+/**
+ * @brief Reset the UserTag and UserTopicTag classes and all pages to allow us to recreate
+ *    the data.
+ *
+ * This can be used as a recovery operation if the UserTags processing fails or the format
+ * of the data changes.
+ */
 function recreateAllUserTags(request, response) {
   // Iterate over all page objects
   var Page = Parse.Object.extend('Page');
   var pageCounter = 0;
 
-  // TODO: Remove all UserTag objects
-  // TODO: Remove all UserTopicTag objects
+  // Remove all UserTag and UserTopicTag objects
+  deleteAll(new Parse.Query('UserTag')).then(function () {
+    response.message('Removed all UserTag objects.');
+    return deleteAll(new Parse.Quert('UserTopicTag'));
+  }).then(function () {
+    response.message('Removed all UserTopicTag objects.');
 
-  // Iterate over all Page objects
-  var pages = new Parse.Query(Page);
-  pages.include('positive_tags');
-  pages.include('negative_tags');
-  pages.each(function (page) {
-    if (pageCounter % 100 === 0) {
-      // Set the  job's progress status
-      response.message(pageCounter + ' pages processed.');
-    }
-    pageCounter += 1;
+    // Iterate over all Page objects
+    var pages = new Parse.Query(Page);
+    return pages.each(function (page) {
+      if (pageCounter % 100 === 0) {
+        // Set the  job's progress status
+        response.message(pageCounter + ' pages processed.');
+      }
+      pageCounter += 1;
 
-    page.set('processState', 0);
-    return page.save();
+      page.set('processState', 0);
+      return page.save();
+    });
   }).then(function() {
     response.success('Success, updated page state for ' + pageCounter + ' pages');
   }, function (error) {
@@ -86,8 +127,6 @@ function updateUserTags(request, response) {
   Parse.Cloud.useMasterKey();
 
   // Iterate over all page objects
-  // TODO: Limit which pages that needs to be processed by keeping a status
-  //       field on the Page object.
   var Page = Parse.Object.extend('Page');
   var UserTag = Parse.Object.extend('UserTag');
   var UserTopicTag = Parse.Object.extend('UserTopicTag');
@@ -98,14 +137,15 @@ function updateUserTags(request, response) {
 
   var pageCounter = 0;
 
-  // Iterate over all Page objects
+  // Iterate over Page objects that should be updated.
+  // Pages with process state != 1 have not been processed.
   var pages = new Parse.Query(Page);
   pages.include('positive_tags');
   pages.include('negative_tags');
-  pages.equalTo('processState', 0);
+  pages.notEqualTo('processState', 1);
   pages.each(function (page) {
     if (pageCounter % 100 === 0) {
-      // Set the  job's progress status
+      // Set the job's progress status
       response.message(pageCounter + ' pages processed.');
     }
     pageCounter += 1;
@@ -120,36 +160,38 @@ function updateUserTags(request, response) {
     var negativeIds = _.indexBy(negativeTags, getObjectId);
     var positiveIds = _.indexBy(positiveTags, getObjectId);
 
-    page.set('processState', 1);
-    userTopicTags[userTopicTags.length] = page;
+    // Get the user tags for the tags associated with this page
+    var userTags = new Parse.Query(UserTag);
+    userTags.include('tag');
+    userTags.equalTo('user', user);
+    userTags.containedIn('tag', allTags);
+    return userTags.find().then(function (userTags) {
+      var objectsToSave = [];
 
-    // Create user topic tags
-    var userTopicTags = [];
-    for (var i = 0; i < allTags.length; i++) {
-      var tag = allTags[i];
-      var tagId = getObjectId(tag);
-      var newUserTopicTag = new UserTopicTag();
+      // Update process state on this page
+      page.set('processState', 1);
+      objectsToSave[objectsToSave.length] = page;
 
-      newUserTopicTag.set('name', tag.get('name'));
-      newUserTopicTag.set('tag',  tag);
-      newUserTopicTag.set('topic', tag.get('topic'));
-      newUserTopicTag.set('user', user);
+      // Create user topic tags
+      var userTopicTags = [];
+      for (var i = 0; i < allTags.length; i++) {
+        var tag = allTags[i];
+        var tagId = getObjectId(tag);
+        var newUserTopicTag = new UserTopicTag();
 
-      var score = (_.has(positiveIds, tagId) ? 1 : 0);
-        + (_.has(negativeIds, tagId) ? -1 : 0);
-      newUserTopicTag.set('score', score);
+        newUserTopicTag.setACL(acl);
+        newUserTopicTag.set('name', tag.get('name'));
+        newUserTopicTag.set('tag',  tag);
+        newUserTopicTag.set('topic', tag.get('topic'));
+        newUserTopicTag.set('user', user);
+        newUserTopicTag.set('createdAt', page.get('createdAt'));
 
-      userTopicTags[userTopicTags.length] = newUserTopicTag;
-    }
-    return Parse.Object.saveAll(userTopicTags).then(function () {
-      // Get the user tags for the tags associated with this page
-      var userTags = new Parse.Query(UserTag);
-      userTags.include('tag');
-      userTags.equalTo('user', user);
-      userTags.containedIn('tag', allTags);
-      return userTags.find();
-    }).then(function (userTags) {
-      var userTagsToSave = [];
+        var score = (_.has(positiveIds, tagId) ? 1 : 0);
+          + (_.has(negativeIds, tagId) ? -1 : 0);
+        newUserTopicTag.set('score', score);
+
+        objectsToSave[objectsToSave.length] = newUserTopicTag;
+      }
 
       // Check if there are any UserTag objects that needs to be created.
       var tagsForExistingUserTags = _.map(userTags, getTag);
@@ -169,7 +211,7 @@ function updateUserTags(request, response) {
         newUserTag.set
           ('negativeCount', _.has(negativeIds, missingTagId) ? 1 : 0);
 
-        userTagsToSave[userTagsToSave.length] = newUserTag;
+        objectsToSave[objectsToSave.length] = newUserTag;
       }
 
       // Increment the tag count for the UserTags
@@ -185,9 +227,9 @@ function updateUserTags(request, response) {
           userTag.increment('negativeCount');
         }
 
-        userTagsToSave[userTagsToSave.length] = userTag;
+        objectsToSave[objectsToSave.length] = userTag;
       }
-      return Parse.Object.saveAll(userTagsToSave);
+      return Parse.Object.saveAll(objectsToSave);
     });
   }).then(function() {
     response.success('Success, updated user tags for ' + pageCounter + ' pages');
