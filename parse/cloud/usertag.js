@@ -95,7 +95,7 @@ function recreateAllUserTags(request, response) {
   // Remove all UserTag and UserTopicTag objects
   deleteAll(new Parse.Query('UserTag')).then(function () {
     response.message('Removed all UserTag objects.');
-    return deleteAll(new Parse.Quert('UserTopicTag'));
+    return deleteAll(new Parse.Query('UserTopicTag'));
   }).then(function () {
     response.message('Removed all UserTopicTag objects.');
 
