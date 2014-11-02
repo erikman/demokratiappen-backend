@@ -30,7 +30,7 @@ function relateTags(request, response) {
   var relationType = requestJSON.relationType;
 
   function debugLog(str) {
-    // Enable next line to turn on debug logging 
+    // Enable next line to turn on debug logging
     console.log('tagrelation.relateTags: ' + str);
   }
   function errorLog(str) {
@@ -46,7 +46,7 @@ function relateTags(request, response) {
       var promise;
       if(findresult.length < 1) {
         tagRelation = createTagRelation(tagName, tagType, relatedTag, relationType);
-        
+
         // Need to use master key, ordinary users are not allowed to create
         // Tag objects
         Parse.Cloud.useMasterKey();
@@ -62,9 +62,9 @@ function relateTags(request, response) {
       return promise;
     }, function(error){
         debugLog("Could not find tag relation.");
-        response.error("Could not find tag relation.");        
+        response.error("Could not find tag relation.");
     }).then(
-    function(tagRelationObject){ 
+    function(tagRelationObject){
       if( !tagRelationObject ){
         debugLog("Tag relation already exists.");
       } else {
@@ -73,11 +73,11 @@ function relateTags(request, response) {
 
       // Return the result tag objects to the requester
       response.success();
-    }, 
+    },
     function(error){
       debugLog("Could not save tag relation.");
       response.error("Could not save tag relation.");
-    });   
+    });
   }
 
   createTagRelationIfNeeded();
@@ -113,7 +113,7 @@ function setAssociatonStrengthForTagRelation(request, response){
   var associationStrength = requestJSON.associationStrength;
 
   function debugLog(str) {
-    // Enable next line to turn on debug logging 
+    // Enable next line to turn on debug logging
     console.log('tagrelation.setAssociatonStrengthForTagRelation: ' + str);
   }
   function errorLog(str) {
@@ -136,9 +136,9 @@ function setAssociatonStrengthForTagRelation(request, response){
       return tagRelation.save();
     }, function(error){
         debugLog("Could not find tag relation.");
-        response.error("Could not find tag relation.");        
+        response.error("Could not find tag relation.");
     }).then(
-    function(tagRelationObject){ 
+    function(tagRelationObject){
       if( !tagRelationObject ){
         debugLog("Failed to update tag relation.");
       } else {
@@ -147,11 +147,11 @@ function setAssociatonStrengthForTagRelation(request, response){
 
       // Return the result tag objects to the requester
       response.success();
-    }, 
+    },
     function(error){
       debugLog("Could not save tag relation." + error.message);
       response.error("Could not save tag relation." + error.message);
-    });   
+    });
   }
 
   updateAssociationStrength();
@@ -167,5 +167,16 @@ function computeAssociatedTags(request, response) {
 
   // Troligen (pga sättet som det lagras) ska vi göra detta som batch-körningar
 }
-
 // exports.computeAssociatedTags = computeAssociatedTags
+
+
+
+/**
+ * Compiled Tag Associations
+ *
+ * Propagate tag strengths along the edges
+ *
+ * tag: {Tag}
+ * relatedTags: {[Tag]}
+ * relatedTagStrength: {[Double]}
+ */
