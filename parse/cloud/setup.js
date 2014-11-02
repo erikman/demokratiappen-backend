@@ -16,13 +16,15 @@
  * along with Demokratiappen.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+var Saplo = require('cloud/saplo');
+
 /**
  * Setup default users and roles we need in the system
  *
  * You can trigger this code using:
  * curl -X POST \
- * -H "X-Parse-Application-Id: p7Nu6RZkIlnGUfofyOvms99yDnehPjzHg18OuFra" \
- * -H "X-Parse-REST-API-Key: W3seCkw5eOmPU3UhBM0zlzbSJ6W7fgAEGRtMpTzH" \
+ * -H "X-Parse-Application-Id: INSERT-PARSE-API-KEY" \
+ * -H "X-Parse-REST-API-Key: INSERT-PARSE-REST-KEY" \
  * -H "Content-Type: application/json" \
  * -d '{}' \
  * https://api.parse.com/1/functions/createDefaultUsers
@@ -72,3 +74,84 @@ function createDefaultUsers(request, response) {
 }
 
 exports.createDefaultUsers = createDefaultUsers;
+
+
+/**
+ * Setup Saplo groups
+ *
+ * You can trigger this code using:
+ * curl -X POST \
+ * -H "X-Parse-Application-Id: INSERT-PARSE-API-KEY" \
+ * -H "X-Parse-REST-API-Key: INSERT-PARSE-REST-KEY" \
+ * -H "Content-Type: application/json" \
+ * -d '{}' \
+ * https://api.parse.com/1/functions/createSaploGroups
+ */
+function createSaploGroups(request, response) {
+  var parseTags;
+  var saploGroups;
+
+  return Saplo.Group.list().then(function (groups) {
+    saploGroups = groups;
+
+    // Iterate over the topic tags and create groups for each one
+    var tagQuery = new Parse.Query('Tag');
+    tagQuery.equalTo('type', 'topic');
+    return tagQuery.find();
+  }).then(function (tags) {
+    parseTags = tags;
+
+    console.log('Have ' + saploGroups.length + ' saplo groups and ' + parseTags.length + ' parse tags.');
+
+    // Saplo has a limit on number of groups that can be created, so start by
+    // checking if there are any groups we should remove.
+    groupRemovePromises = [];
+    for (var groupId = 0; groupId < saploGroups.length; groupId++) {
+      var haveTagForGroup = false;
+      for (var tagId = 0; tagId < parseTags.length; tagId++) {
+        if (saploGroups[groupId].name === parseTags[tagId].get('name')) {
+          haveTagForGroup = true;
+          break;
+        }
+      }
+
+      if (!haveTagForGroup) {
+        // No matching tag for this group. Remove the group.
+        console.log('Remove group ' + saploGroups[groupId].name);
+        groupRemovePromises[groupRemovePromises.length]
+          = saploGroups[groupId].remove();
+      }
+    }
+    return Parse.Promise.when(groupRemovePromises);
+  }).then(function() {
+    // Iterate over the topic tags, create saplo groups for the ones we don't
+    // already have.
+    var groupCreatePromises = [];
+    for (var tagId = 0; tagId < parseTags.length; tagId++) {
+      var tag = parseTags[tagId];
+
+      // Check if we have a group for this topic.
+      var haveGroupForTopic = false;
+      for (var groupId = 0; groupId < saploGroups.length; groupId++) {
+        if (saploGroups[groupId].name === tag.get('name')) {
+          haveGroupForTopic = true;
+          break;
+        }
+      }
+
+      if (!haveGroupForTopic) {
+        console.log('Create saplo group ' + tag.get('name'));
+        groupCreatePromises[groupCreatePromises.length]
+          = Saplo.Group.create(tag.get('name'), 'sv');
+      }
+    }
+
+    return Parse.Promise.when(groupCreatePromises);
+  }).then(function () {
+    response.success("createSaploGroups: Completed successfully!");
+  }, function(error) {
+    console.error('createSaploGroups: Failed: ' + JSON.stringify(error));
+    response.error(error);
+  });
+}
+exports.createSaploGroups = createSaploGroups;

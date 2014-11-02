@@ -141,6 +141,80 @@ function addTagsOnUrl(url) {
 
 
 /**
+ * From an url get list of topic tags and their relevance.
+ *
+ * This function takes an Url object as input (which might be unsaved but needs
+ * to have the textId parameter set), and asks Saplo for the topics related to
+ * the url.
+ *
+ * It will update the 'relevanceTopics' property on the url object but will not
+ * store the url in the Parse database.
+ *
+ * @return Parse.Promise with the updated url object as result.
+ */
+function addTopicsOnUrl(url) {
+  function dLog(str) {
+    // Enable next line to turn on debug logging
+    // console.log('addTopicsOnUrl: ' + str);
+  }
+  dLog('begin');
+
+  var saploGroups;
+
+  var text = new Saplo.Text({
+    text_id: url.get('textId'),
+    collection_id: collection.collection_id
+  });
+
+  // Disable topics for now, not setup correctly in saplo yet.
+  return Parse.Promise.as(url);
+
+  return text.relatedGroups().then(function (relatedGroups) {
+    dLog('have related groups');
+    saploGroups = relatedGroups;
+
+    var groupNames = [];
+    for (var i = 0; i < relatedGroups.length; i++) {
+      groupNames[i] = relatedGroups[i].group.name;
+    }
+
+    // Find tags for the related groups
+    var Tag = Parse.Object.extend('Tag');
+    var query = new Parse.Query('Tag');
+    query.equalTo('type', 'topic');
+    query.containedIn('name', groupNames);
+    return query.find();
+  }).then(function (parseTags) {
+    dLog('have parse tags');
+
+    // Build array where tag is associated with relevance (for storing in Parse
+    // database).
+    var urlRelevanceTopics = [];
+    for (var i = 0; i < parseTags.length; i++) {
+      // We can't get any groups that we don't have tags for since we create the
+      // groups from the tags, so we just assume we will get a match in the
+      // saploGroups array.
+      for (var j = 0; j < saploGroups.length; j++) {
+        if (saploGroups[j].group.name === parseTags[i].get('name')) {
+          urlRelevanceTags[urlRelevanceTags.length] = {
+            tag: parseTags[i],
+            relevance: saploGroups[i].relevance
+          };
+          break;
+        }
+      }
+    }
+
+    // Update the url object with topic tags
+    url.set("relevanceTopics", urlRelevanceTopics);
+
+    dLog('success');
+    return Parse.Promise.as(url);
+  });
+}
+
+
+/**
  * @brief Add a text to the database
  *
  * This function is a cloud function, the parameters on the request object are
@@ -196,7 +270,9 @@ function extractTags(request, response) {
     url.set("text", textBody);
     url.set("headline", textHeadline);
 
-    return addTagsOnUrl(url).then(function () {
+    return addTopicsOnUrl(url).then(function (url) {
+      return addTagsOnUrl(url);
+    }).then(function () {
       // Search for extra tags to boost
       return tagBooster.boostTags(textHeadline + ' ' + textBody);
     }).then(function (extraRelevanceTags) {

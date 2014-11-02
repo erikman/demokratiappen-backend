@@ -35,6 +35,7 @@ Parse.Cloud.define('tagga', tag.extractTags);
 
 // var setup = require('cloud/setup');
 // Parse.Cloud.define('createDefaultUsers', setup.createDefaultUsers);
+// Parse.Cloud.define('createSaploGroups', setup.createSaploGroups);
 
 Parse.Cloud.define('relateTags', tagRelator.relateTags);
 Parse.Cloud.define('setAssociatonStrengthForTagRelation', tagRelator.setAssociatonStrengthForTagRelation);
